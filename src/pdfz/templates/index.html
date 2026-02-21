@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDFZ</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a14;
+      color: #c8c8d0;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 32px 40px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ── */
+    .header {
+      margin-bottom: 32px;
+    }
+    .header h1 {
+      font-size: 28px;
+      color: #7af;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .header .tagline {
+      font-size: 11px;
+      color: #558;
+      letter-spacing: 1px;
+    }
+
+    /* ── Sections ── */
+    .section {
+      margin-bottom: 32px;
+    }
+    .section-title {
+      font-size: 11px;
+      color: #668;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-title .count {
+      color: #558;
+      font-size: 10px;
+    }
+    .section-title .separator {
+      flex: 1;
+      height: 1px;
+      background: #1a1a2a;
+    }
+
+    /* ── Ingest Form ── */
+    .ingest-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .ingest-row input[type="text"] {
+      flex: 1;
+      padding: 9px 14px;
+      background: #0f0f1e;
+      border: 1px solid #2a2a3a;
+      border-radius: 3px;
+      color: #c8c8d0;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .ingest-row input[type="text"]:focus {
+      border-color: #7af;
+    }
+    .ingest-row input[type="text"]::placeholder {
+      color: #446;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      background: #161624;
+      color: #aab;
+      border: 1px solid #2a2a3a;
+      padding: 8px 16px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover {
+      background: #1e1e30;
+      border-color: #3a3a5a;
+      color: #ccd;
+    }
+    .btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .btn.primary {
+      border-color: #335;
+      color: #7af;
+    }
+    .btn.primary:hover {
+      background: #1a1a30;
+      border-color: #7af;
+    }
+    .btn.success {
+      border-color: #253;
+      color: #3c8;
+    }
+    .btn.success:hover {
+      background: #0f1f18;
+      border-color: #3c8;
+    }
+    .btn.warning {
+      border-color: #443;
+      color: #cc8;
+    }
+    .btn.warning:hover {
+      background: #1f1f10;
+      border-color: #cc8;
+    }
+
+    /* ── Status Messages ── */
+    .msg {
+      padding: 8px 12px;
+      border-radius: 3px;
+      font-size: 12px;
+      margin-top: 8px;
+      display: none;
+    }
+    .msg.visible { display: block; }
+    .msg.success {
+      background: #0a1f10;
+      border: 1px solid #2a5a30;
+      color: #3c8;
+    }
+    .msg.error {
+      background: #1f0a0a;
+      border: 1px solid #5a2a2a;
+      color: #c88;
+    }
+    .msg.info {
+      background: #0a0f1f;
+      border: 1px solid #2a3a5a;
+      color: #7af;
+    }
+
+    /* ── Document Cards ── */
+    .doc-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .doc-card {
+      background: #0f0f1e;
+      border: 1px solid #1a1a2a;
+      border-left: 3px solid #335;
+      padding: 12px 14px;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.15s;
+    }
+    .doc-card:hover {
+      background: #141428;
+      border-left-color: #7af;
+    }
+    .doc-card .doc-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .doc-card .doc-title {
+      color: #7af;
+      font-size: 14px;
+      font-weight: bold;
+    }
+    .doc-card .doc-title a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .doc-card .doc-title a:hover {
+      text-decoration: underline;
+    }
+    .doc-card .doc-meta {
+      font-size: 11px;
+      color: #668;
+      margin-top: 4px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .doc-card .doc-meta span {
+      white-space: nowrap;
+    }
+    .doc-card .doc-summary {
+      font-size: 12px;
+      color: #889;
+      margin-top: 8px;
+      line-height: 1.5;
+    }
+    .doc-card .doc-toc {
+      display: none;
+      margin-top: 10px;
+      padding: 10px 12px;
+      background: #0c0c1a;
+      border: 1px solid #1a1a2a;
+      border-radius: 2px;
+      font-size: 11px;
+      color: #889;
+      white-space: pre-wrap;
+      line-height: 1.6;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .doc-card .doc-toc.open { display: block; }
+    .doc-card .expand-hint {
+      font-size: 10px;
+      color: #446;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-top: 6px;
+    }
+
+    .empty-state {
+      color: #446;
+      font-size: 12px;
+      padding: 16px 0;
+    }
+
+    /* ── Eval Results ── */
+    .eval-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .eval-status {
+      font-size: 11px;
+      color: #558;
+    }
+    .eval-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .eval-table th {
+      text-align: left;
+      font-size: 10px;
+      color: #558;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 6px 10px;
+      border-bottom: 1px solid #1a1a2a;
+    }
+    .eval-table td {
+      padding: 7px 10px;
+      border-bottom: 1px solid #111120;
+    }
+    .eval-table tr:hover td {
+      background: #0f0f1e;
+    }
+    .eval-table .case-name {
+      color: #aab;
+    }
+    .eval-table .case-output {
+      color: #668;
+      font-size: 11px;
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .eval-table .duration {
+      color: #558;
+      text-align: right;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      vertical-align: middle;
+    }
+    .status-dot.pass { background: #3c8; }
+    .status-dot.fail { background: #c66; }
+    .status-dot.running {
+      background: #cc8;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ── MCP Setup ── */
+    .code-block {
+      background: #0c0c1a;
+      border: 1px solid #1a1a2a;
+      border-radius: 3px;
+      padding: 14px 16px;
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-x: auto;
+      color: #aab;
+    }
+    .code-block .key { color: #7af; }
+    .code-block .str { color: #3c8; }
+    .instructions {
+      font-size: 12px;
+      color: #889;
+      line-height: 1.6;
+      margin-top: 12px;
+    }
+    .instructions code {
+      background: #161624;
+      padding: 2px 6px;
+      border-radius: 2px;
+      color: #cc8;
+      font-size: 12px;
+    }
+    .instructions ol {
+      padding-left: 20px;
+      margin-top: 8px;
+    }
+    .instructions li {
+      margin-bottom: 6px;
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3a3a5a; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>PDFZ</h1>
+    <div class="tagline">LLM-native PDF retrieval engine</div>
+  </div>
+
+  <!-- Ingest -->
+  <div class="section">
+    <div class="section-title">
+      Ingest document
+      <span class="separator"></span>
+    </div>
+    <div class="ingest-row">
+      <input type="text" id="ingest-url" placeholder="https://example.com/document.pdf" />
+      <button class="btn primary" id="ingest-btn" onclick="doIngest()">Ingest</button>
+    </div>
+    <div class="msg" id="ingest-msg"></div>
+  </div>
+
+  <!-- Documents -->
+  <div class="section">
+    <div class="section-title">
+      Indexed documents
+      <span class="count" id="doc-count"></span>
+      <span class="separator"></span>
+    </div>
+    <div class="doc-list" id="doc-list">
+      <div class="empty-state">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Evals -->
+  <div class="section">
+    <div class="section-title">
+      Evaluation suite
+      <span class="separator"></span>
+    </div>
+    <div class="eval-controls">
+      <button class="btn warning" id="eval-btn" onclick="doRunEvals()">Run evals</button>
+      <span class="eval-status" id="eval-status"></span>
+    </div>
+    <div id="eval-results"></div>
+  </div>
+
+  <!-- MCP Setup -->
+  <div class="section">
+    <div class="section-title">
+      MCP server setup
+      <span class="separator"></span>
+    </div>
+    <div class="code-block"><span class="key">{</span>
+  <span class="key">"mcpServers"</span>: {
+    <span class="key">"pdfz"</span>: {
+      <span class="key">"command"</span>: <span class="str">"uv"</span>,
+      <span class="key">"args"</span>: [
+        <span class="str">"run"</span>,
+        <span class="str">"--directory"</span>,
+        <span class="str">"/path/to/pdfz"</span>,
+        <span class="str">"pdfz-mcp"</span>
+      ]
+    }
+  }
+<span class="key">}</span></div>
+    <div class="instructions">
+      <ol>
+        <li>Add the JSON above to your project's <code>.mcp.json</code> file (update the path)</li>
+        <li>Make sure <code>ANTHROPIC_API_KEY</code> is set in the pdfz project's <code>.env</code></li>
+        <li>Restart Claude Code &mdash; three tools will be available:
+          <br/><code>list_documents</code> &mdash; browse all ingested PDFs
+          <br/><code>get_document_toc</code> &mdash; view a document's table of contents
+          <br/><code>search_document_pages</code> &mdash; ask questions about specific pages
+        </li>
+      </ol>
+    </div>
+  </div>
+
+<script>
+/* ── Ingest ── */
+async function doIngest() {
+  const url = document.getElementById('ingest-url').value.trim();
+  if (!url) return;
+
+  const btn = document.getElementById('ingest-btn');
+  const msg = document.getElementById('ingest-msg');
+  btn.disabled = true;
+  btn.textContent = 'Ingesting...';
+  showMsg(msg, 'info', 'Downloading and analyzing PDF...');
+
+  try {
+    const res = await fetch('/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      showMsg(msg, 'success', `Ingested "${data.title}" (${data.total_pages} pages)`);
+      document.getElementById('ingest-url').value = '';
+      loadDocuments();
+    } else {
+      showMsg(msg, 'error', data.detail || 'Ingestion failed');
+    }
+  } catch (e) {
+    showMsg(msg, 'error', 'Network error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Ingest';
+  }
+}
+
+function showMsg(el, type, text) {
+  el.className = 'msg visible ' + type;
+  el.textContent = text;
+}
+
+/* ── Documents ── */
+async function loadDocuments() {
+  try {
+    const res = await fetch('/documents');
+    const docs = await res.json();
+    const list = document.getElementById('doc-list');
+    const count = document.getElementById('doc-count');
+    count.textContent = docs.length ? `(${docs.length})` : '';
+
+    if (!docs.length) {
+      list.innerHTML = '<div class="empty-state">No documents ingested yet. Paste a PDF URL above to get started.</div>';
+      return;
+    }
+
+    list.innerHTML = docs.map(doc => {
+      const authors = doc.metadata.authors.length
+        ? doc.metadata.authors.join(', ')
+        : 'Unknown';
+      const date = doc.metadata.date_published || 'Unknown';
+      const pages = doc.total_pages || '?';
+      const hasToc = doc.toc ? true : false;
+
+      return `
+        <div class="doc-card" onclick="toggleToc(this)">
+          <div class="doc-header">
+            <div>
+              <div class="doc-title">
+                <a href="${escHtml(doc.source_url)}" target="_blank" onclick="event.stopPropagation()">${escHtml(doc.metadata.title)}</a>
+              </div>
+              <div class="doc-meta">
+                <span>id: ${escHtml(doc.id)}</span>
+                <span>${escHtml(authors)}</span>
+                <span>${escHtml(String(date))}</span>
+                <span>${pages} pages</span>
+              </div>
+            </div>
+          </div>
+          <div class="doc-summary">${escHtml(doc.contextual_summary)}</div>
+          ${hasToc ? `<div class="expand-hint">click to show table of contents</div>
+          <div class="doc-toc">${escHtml(doc.toc)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    document.getElementById('doc-list').innerHTML =
+      '<div class="empty-state">Failed to load documents.</div>';
+  }
+}
+
+function toggleToc(card) {
+  const toc = card.querySelector('.doc-toc');
+  const hint = card.querySelector('.expand-hint');
+  if (!toc) return;
+  const open = toc.classList.toggle('open');
+  if (hint) hint.textContent = open ? 'click to hide table of contents' : 'click to show table of contents';
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+/* ── Evals ── */
+async function loadEvals() {
+  try {
+    const res = await fetch('/api/evals/latest');
+    const data = await res.json();
+    renderEvalResults(data);
+  } catch (e) { /* ignore */ }
+}
+
+async function doRunEvals() {
+  const btn = document.getElementById('eval-btn');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  document.getElementById('eval-status').textContent = 'Eval run in progress...';
+
+  try {
+    await fetch('/api/evals/run', { method: 'POST' });
+    // Poll for completion
+    pollEvals();
+  } catch (e) {
+    document.getElementById('eval-status').textContent = 'Failed to start eval run';
+    btn.disabled = false;
+    btn.textContent = 'Run evals';
+  }
+}
+
+async function pollEvals() {
+  const btn = document.getElementById('eval-btn');
+  try {
+    const res = await fetch('/api/evals/latest');
+    const data = await res.json();
+
+    if (data.status === 'running') {
+      setTimeout(pollEvals, 3000);
+      return;
+    }
+
+    renderEvalResults(data);
+    btn.disabled = false;
+    btn.textContent = 'Run evals';
+  } catch (e) {
+    setTimeout(pollEvals, 5000);
+  }
+}
+
+function renderEvalResults(data) {
+  const container = document.getElementById('eval-results');
+  const status = document.getElementById('eval-status');
+  const btn = document.getElementById('eval-btn');
+
+  if (!data || data.status === 'none') {
+    container.innerHTML = '<div class="empty-state">No eval runs yet.</div>';
+    status.textContent = '';
+    return;
+  }
+
+  if (data.status === 'running') {
+    status.textContent = 'Eval run in progress...';
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+    setTimeout(pollEvals, 3000);
+    return;
+  }
+
+  if (data.status === 'failed') {
+    status.textContent = `Failed at ${fmtTime(data.completed_at)}`;
+    container.innerHTML = `<div class="msg visible error">${escHtml(data.error || 'Unknown error')}</div>`;
+    return;
+  }
+
+  const passed = data.cases.filter(c => c.passed).length;
+  const total = data.cases.length;
+  status.textContent = `${passed}/${total} passed \u2022 ${fmtTime(data.completed_at)}`;
+
+  container.innerHTML = `
+    <table class="eval-table">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Case</th>
+          <th>Output</th>
+          <th style="text-align:right">Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.cases.map(c => `
+          <tr>
+            <td><span class="status-dot ${c.passed ? 'pass' : 'fail'}"></span></td>
+            <td class="case-name">${escHtml(c.name)}</td>
+            <td class="case-output" title="${escHtml(c.output)}">${escHtml(c.output)}</td>
+            <td class="duration">${c.duration}s</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleString();
+}
+
+/* ── Init ── */
+loadDocuments();
+loadEvals();
+</script>
+
+</body>
+</html>
