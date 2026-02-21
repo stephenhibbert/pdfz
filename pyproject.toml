@@ -1,0 +1,32 @@
+[project]
+name = "pdfz"
+version = "0.1.0"
+description = "LLM-native PDF retrieval engine"
+readme = "README.md"
+authors = [
+    { name = "Stephen Hibbert", email = "stephenhibbert92@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-ai>=0.1",
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+    "fastmcp>=2.0",
+    "httpx>=0.28",
+    "pypdf>=5.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+evals = [
+    "pydantic-evals>=0.1",
+]
+
+[project.scripts]
+pdfz-server = "pdfz.server:main"
+pdfz-mcp = "pdfz.mcp_server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
