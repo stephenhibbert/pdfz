@@ -30,6 +30,9 @@ evals = [
 pdfz-server = "pdfz.server:main"
 pdfz-mcp = "pdfz.mcp_server:main"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdfz"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
