@@ -44,8 +44,9 @@ async def run_evals() -> dict:
         root_str = str(PROJECT_ROOT)
         if root_str not in sys.path:
             sys.path.insert(0, root_str)
-        from evals.run_evals import dataset, ask_pdf_pages
+        from evals.run_evals import dataset, ask_pdf_pages, check_prerequisites
 
+        check_prerequisites()
         report = await dataset.evaluate(ask_pdf_pages)
 
         cases = []

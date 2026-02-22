@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 load_dotenv()
+
+import logfire
+logfire.configure(
+    service_name="pdfz-server",
+    environment=os.environ.get("RAILWAY_ENVIRONMENT", "development"),
+)
+logfire.instrument_pydantic_ai()
+logfire.instrument_httpx()
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -15,6 +24,8 @@ from pdfz.models import IngestRequest, IngestResponse, PDFDocument
 from pdfz.store import DocumentStore
 
 app = FastAPI(title="PDFZ", description="LLM-native PDF retrieval engine")
+logfire.instrument_fastapi(app)
+
 store = DocumentStore()
 templates = Jinja2Templates(
     directory=str(Path(__file__).parent / "templates")

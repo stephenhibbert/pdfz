@@ -1,8 +1,17 @@
 from __future__ import annotations
 
-from dotenv import load_dotenv
+import os
 
+from dotenv import load_dotenv
 load_dotenv()
+
+import logfire
+logfire.configure(
+    service_name="pdfz-mcp",
+    environment=os.environ.get("RAILWAY_ENVIRONMENT", "development"),
+)
+logfire.instrument_pydantic_ai()
+logfire.instrument_httpx()
 
 from fastmcp import FastMCP
 from pydantic_ai import Agent, BinaryContent
