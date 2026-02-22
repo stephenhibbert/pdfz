@@ -563,7 +563,10 @@
       MCP server setup
       <span class="separator"></span>
     </div>
-    <div class="code-block"><span class="key">{</span>
+    <div class="instructions" style="margin-top:0">
+      Add to your <code>.mcp.json</code> &mdash; the MCP server runs locally and calls the deployed API:
+    </div>
+    <div class="code-block" style="margin-top:8px"><span class="key">{</span>
   <span class="key">"mcpServers"</span>: {
     <span class="key">"pdfz"</span>: {
       <span class="key">"command"</span>: <span class="str">"uv"</span>,
@@ -572,14 +575,18 @@
         <span class="str">"--directory"</span>,
         <span class="str">"/path/to/pdfz"</span>,
         <span class="str">"pdfz-mcp"</span>
-      ]
+      ],
+      <span class="key">"env"</span>: {
+        <span class="key">"PDFZ_API_URL"</span>: <span class="str">"{{ app_url }}"</span>,
+        <span class="key">"PDFZ_API_TOKEN"</span>: <span class="str">"&lt;token&gt;"</span>
+      }
     }
   }
 <span class="key">}</span></div>
     <div class="instructions">
       <ol>
-        <li>Add the JSON above to your project's <code>.mcp.json</code> file (update the path)</li>
-        <li>Make sure <code>ANTHROPIC_API_KEY</code> is set in the pdfz project's <code>.env</code></li>
+        <li>Copy the JSON above into your project's <code>.mcp.json</code> (update the <code>--directory</code> path)</li>
+        <li>Replace <code>&lt;token&gt;</code> with the API token shown below</li>
         <li>Restart Claude Code &mdash; three tools will be available:
           <br/><code>list_documents</code> &mdash; browse all ingested PDFs
           <br/><code>get_document_toc</code> &mdash; view a document's table of contents

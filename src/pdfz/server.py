@@ -14,6 +14,7 @@ logfire.configure(
 logfire.instrument_pydantic_ai()
 logfire.instrument_httpx()
 
+from pydantic import BaseModel
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -154,6 +155,53 @@ async def get_document(document_id: str):
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
+
+
+class SearchRequest(BaseModel):
+    document_id: str
+    page_start: int
+    page_end: int
+    question: str
+
+
+@app.post("/api/search")
+async def search_pages(req: SearchRequest):
+    """Search specific pages of a document by asking a question."""
+    doc = store.get(req.document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if req.page_end - req.page_start > 9:
+        raise HTTPException(status_code=400, detail="Max 10 pages at a time")
+    if req.page_start < 1:
+        raise HTTPException(status_code=400, detail="page_start must be >= 1")
+    if doc.total_pages and req.page_end > doc.total_pages:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document only has {doc.total_pages} pages",
+        )
+
+    from pydantic_ai import Agent, BinaryContent
+    from pdfz.pdf_utils import download_pdf, extract_page_range
+
+    pdf_bytes = await download_pdf(doc.source_url)
+    page_range_bytes = extract_page_range(pdf_bytes, req.page_start, req.page_end)
+
+    agent = Agent(
+        "anthropic:claude-sonnet-4-5-20250929",
+        system_prompt=(
+            "You are a document research assistant. Answer the question "
+            "based solely on the provided PDF pages. If the answer is "
+            "not found in the provided pages, say so clearly."
+        ),
+    )
+    result = await agent.run(
+        [
+            BinaryContent(data=page_range_bytes, media_type="application/pdf"),
+            f"Question about pages {req.page_start}-{req.page_end} of "
+            f"'{doc.metadata.title}':\n\n{req.question}",
+        ]
+    )
+    return {"answer": result.output}
 
 
 @app.post("/api/evals/run")

@@ -1,3 +1,5 @@
+"""PDFZ MCP server — thin client that calls the deployed PDFZ API."""
+
 from __future__ import annotations
 
 import os
@@ -5,41 +7,24 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-import logfire
-logfire.configure(
-    service_name="pdfz-mcp",
-    environment=os.environ.get("RAILWAY_ENVIRONMENT", "development"),
-)
-logfire.instrument_pydantic_ai()
-logfire.instrument_httpx()
-
 from fastmcp import FastMCP
-from pydantic_ai import Agent, BinaryContent
-
-from pdfz.pdf_utils import download_pdf, extract_page_range
-from pdfz.store import DocumentStore
+import httpx
 
 mcp = FastMCP(name="pdfz")
-store = DocumentStore()
 
-QUERY_SYSTEM_PROMPT = (
-    "You are a document research assistant. You will receive specific "
-    "pages from a PDF document along with a question. Answer the question "
-    "based solely on the content of the provided pages. If the answer is "
-    "not found in the provided pages, say so clearly."
-)
-
-_query_agent: Agent[None, str] | None = None
+API_URL = os.environ.get("PDFZ_API_URL", "http://localhost:8000")
+API_TOKEN = os.environ.get("PDFZ_API_TOKEN", "")
 
 
-def _get_query_agent() -> Agent[None, str]:
-    global _query_agent
-    if _query_agent is None:
-        _query_agent = Agent(
-            "anthropic:claude-sonnet-4-5-20250929",
-            system_prompt=QUERY_SYSTEM_PROMPT,
-        )
-    return _query_agent
+def _headers() -> dict[str, str]:
+    h = {"Content-Type": "application/json"}
+    if API_TOKEN:
+        h["Authorization"] = f"Bearer {API_TOKEN}"
+    return h
+
+
+def _client() -> httpx.Client:
+    return httpx.Client(base_url=API_URL, headers=_headers(), timeout=60.0)
 
 
 @mcp.tool()
@@ -48,16 +33,22 @@ def list_documents() -> str:
 
     Call this first to see what documents are available for searching.
     """
-    docs = store.list_all()
+    with _client() as client:
+        res = client.get("/documents")
+        res.raise_for_status()
+        docs = res.json()
+
     if not docs:
         return "No documents have been ingested yet."
+
     lines = []
     for doc in docs:
+        meta = doc.get("metadata", {})
+        authors = ", ".join(meta.get("authors", [])) or "Unknown"
         lines.append(
-            f"- **{doc.metadata.title}** (id: {doc.id})\n"
-            f"  Pages: {doc.total_pages} | "
-            f"Authors: {', '.join(doc.metadata.authors) or 'Unknown'}\n"
-            f"  Summary: {doc.contextual_summary}"
+            f"- **{meta.get('title', 'Untitled')}** (id: {doc['id']})\n"
+            f"  Pages: {doc.get('total_pages', '?')} | Authors: {authors}\n"
+            f"  Summary: {doc.get('contextual_summary', '')}"
         )
     return "\n\n".join(lines)
 
@@ -72,16 +63,22 @@ def get_document_toc(document_id: str) -> str:
     Args:
         document_id: The ID of the document (from list_documents).
     """
-    doc = store.get(document_id)
-    if doc is None:
-        return f"Document {document_id} not found."
-    if not doc.toc:
-        return f"No table of contents available for '{doc.metadata.title}'."
-    return f"# Table of Contents: {doc.metadata.title}\n\n{doc.toc}"
+    with _client() as client:
+        res = client.get(f"/documents/{document_id}")
+        if res.status_code == 404:
+            return f"Document {document_id} not found."
+        res.raise_for_status()
+        doc = res.json()
+
+    toc = doc.get("toc", "")
+    title = doc.get("metadata", {}).get("title", "Unknown")
+    if not toc:
+        return f"No table of contents available for '{title}'."
+    return f"# Table of Contents: {title}\n\n{toc}"
 
 
 @mcp.tool()
-async def search_document_pages(
+def search_document_pages(
     document_id: str,
     page_start: int,
     page_end: int,
@@ -89,9 +86,9 @@ async def search_document_pages(
 ) -> str:
     """Search specific pages of a PDF document by asking a question.
 
-    Downloads the PDF, extracts the requested page range, sends it to an LLM
-    along with the question, and returns the answer. Use the TOC to determine
-    which pages to search.
+    The server downloads the PDF, extracts the requested page range, sends it
+    to an LLM along with the question, and returns the answer. Use the TOC to
+    determine which pages to search.
 
     Args:
         document_id: The ID of the document to search.
@@ -99,28 +96,23 @@ async def search_document_pages(
         page_end: Last page number (1-indexed, inclusive). Max 10 page span.
         question: The question to ask about the content of those pages.
     """
-    doc = store.get(document_id)
-    if doc is None:
-        return f"Document {document_id} not found."
-
-    if page_end - page_start > 9:
-        return "Please limit page range to 10 pages at a time."
-    if page_start < 1:
-        return "page_start must be >= 1."
-    if doc.total_pages and page_end > doc.total_pages:
-        return f"Document only has {doc.total_pages} pages."
-
-    pdf_bytes = await download_pdf(doc.source_url)
-    page_range_bytes = extract_page_range(pdf_bytes, page_start, page_end)
-
-    result = await _get_query_agent().run(
-        [
-            BinaryContent(data=page_range_bytes, media_type="application/pdf"),
-            f"Question about pages {page_start}-{page_end} of "
-            f"'{doc.metadata.title}':\n\n{question}",
-        ]
-    )
-    return result.output
+    with _client() as client:
+        res = client.post(
+            "/api/search",
+            json={
+                "document_id": document_id,
+                "page_start": page_start,
+                "page_end": page_end,
+                "question": question,
+            },
+            timeout=120.0,
+        )
+        if res.status_code == 404:
+            return f"Document {document_id} not found."
+        if res.status_code == 400:
+            return res.json().get("detail", "Bad request")
+        res.raise_for_status()
+        return res.json().get("answer", "")
 
 
 def main():
