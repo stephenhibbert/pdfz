@@ -6,8 +6,12 @@ from pathlib import Path
 
 from pdfz.models import PDFDocument
 
-_DATA_DIR = Path(os.environ.get("PDFZ_DATA_DIR", Path(__file__).parent.parent.parent / "data"))
-DEFAULT_DB_PATH = _DATA_DIR / "documents.json"
+# Use Railway volume mount if available, otherwise fall back to local data dir
+_volume_mount = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+if _volume_mount:
+    DEFAULT_DB_PATH = Path(_volume_mount) / "documents.json"
+else:
+    DEFAULT_DB_PATH = Path(__file__).parent.parent.parent / "data" / "documents.json"
 
 
 class DocumentStore:
