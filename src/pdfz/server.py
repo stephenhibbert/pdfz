@@ -27,11 +27,15 @@ from pdfz.mcp_server import mcp
 from pdfz.models import IngestRequest, IngestResponse, PDFDocument
 from pdfz.store import DocumentStore
 
-app = FastAPI(title="PDFZ", description="LLM-native PDF retrieval engine")
-logfire.instrument_fastapi(app)
+# Mount MCP server as a streamable-http endpoint at /mcp
+mcp_app = mcp.http_app(path="/", transport="streamable-http")
 
-# Mount MCP server as a streamable-http endpoint
-mcp_app = mcp.http_app(transport="streamable-http")
+app = FastAPI(
+    title="PDFZ",
+    description="LLM-native PDF retrieval engine",
+    lifespan=mcp_app.lifespan,
+)
+logfire.instrument_fastapi(app)
 app.mount("/mcp", mcp_app)
 
 # Auth enabled only in production (when RAILWAY_ENVIRONMENT is set)
