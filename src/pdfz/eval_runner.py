@@ -7,8 +7,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+import os
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-RESULTS_PATH = PROJECT_ROOT / "data" / "eval_results.json"
+_DATA_DIR = Path(os.environ.get("PDFZ_DATA_DIR", PROJECT_ROOT / "data"))
+RESULTS_PATH = _DATA_DIR / "eval_results.json"
 
 # Global state for the current run
 _current_run: dict | None = None

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from pdfz.models import PDFDocument
 
-DEFAULT_DB_PATH = Path(__file__).parent.parent.parent / "data" / "documents.json"
+_DATA_DIR = Path(os.environ.get("PDFZ_DATA_DIR", Path(__file__).parent.parent.parent / "data"))
+DEFAULT_DB_PATH = _DATA_DIR / "documents.json"
 
 
 class DocumentStore:
