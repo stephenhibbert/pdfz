@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from pdfz.auth import API_TOKEN, SECRET_KEY, send_magic_link, verify_token
+from pdfz.auth import API_TOKEN, APP_URL, SECRET_KEY, send_magic_link, verify_token
 from pdfz.eval_runner import get_latest_results, run_evals
 from pdfz.ingest import DuplicateDocumentError, ingest_pdf
 from pdfz.models import IngestRequest, IngestResponse, PDFDocument
@@ -118,6 +118,7 @@ async def index(request: Request):
     return templates.TemplateResponse("index.html", {
         "request": request,
         "api_token": API_TOKEN,
+        "app_url": APP_URL,
     })
 
 

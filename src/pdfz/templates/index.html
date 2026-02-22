@@ -589,6 +589,28 @@
     </div>
 
     <div class="section-title" style="margin-top:20px">
+      API endpoints
+      <span class="separator"></span>
+    </div>
+    <div class="instructions" style="margin-top:0">
+      The deployed API is available at <code>{{ app_url }}</code>. Authenticate with the bearer token below.
+    </div>
+    <div class="code-block" style="margin-top:8px; font-size:11px; line-height:1.8">
+<span style="color:#668"># List documents</span>
+curl <span class="str">{{ app_url }}/documents</span> \
+  -H <span class="str">"Authorization: Bearer &lt;token&gt;"</span>
+
+<span style="color:#668"># Ingest a PDF</span>
+curl -X POST <span class="str">{{ app_url }}/ingest</span> \
+  -H <span class="str">"Authorization: Bearer &lt;token&gt;"</span> \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{"url": "https://example.com/doc.pdf"}'</span>
+
+<span style="color:#668"># Get document details</span>
+curl <span class="str">{{ app_url }}/documents/{id}</span> \
+  -H <span class="str">"Authorization: Bearer &lt;token&gt;"</span></div>
+
+    <div class="section-title" style="margin-top:20px">
       API token
       <span class="separator"></span>
     </div>
