@@ -2,7 +2,6 @@
 name = "pdfz"
 version = "0.1.0"
 description = "LLM-native PDF retrieval engine"
-readme = "README.md"
 authors = [
     { name = "Stephen Hibbert", email = "stephenhibbert92@gmail.com" }
 ]
