@@ -79,8 +79,8 @@ async def ask_pdf_pages(inp: EvalInput) -> str:
     pages = extract_page_range(pdf_bytes, inp.page_start, inp.page_end)
     result = await _get_query_agent().run(
         [
-            inp.question,
             BinaryContent(data=pages, media_type="application/pdf"),
+            inp.question,
         ]
     )
     return result.output

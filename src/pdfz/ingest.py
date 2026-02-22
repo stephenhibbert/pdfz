@@ -94,8 +94,8 @@ async def ingest_pdf(url: str, store: DocumentStore) -> PDFDocument:
 
     result = await _get_extraction_agent().run(
         [
-            "Analyze this PDF document and extract structured metadata.",
             BinaryContent(data=first_pages_bytes, media_type="application/pdf"),
+            "Analyze this PDF document and extract structured metadata.",
         ]
     )
 

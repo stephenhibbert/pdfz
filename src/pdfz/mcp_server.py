@@ -115,9 +115,9 @@ async def search_document_pages(
 
     result = await _get_query_agent().run(
         [
+            BinaryContent(data=page_range_bytes, media_type="application/pdf"),
             f"Question about pages {page_start}-{page_end} of "
             f"'{doc.metadata.title}':\n\n{question}",
-            BinaryContent(data=page_range_bytes, media_type="application/pdf"),
         ]
     )
     return result.output
