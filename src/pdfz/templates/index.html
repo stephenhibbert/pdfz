@@ -563,10 +563,57 @@
       MCP server setup
       <span class="separator"></span>
     </div>
-    <div class="instructions" style="margin-top:0">
-      Add to your <code>.mcp.json</code> &mdash; the MCP server runs locally and calls the deployed API:
+
+    <div class="section-title" style="margin-top:16px; font-size:10px">
+      API token
+      <span class="separator"></span>
     </div>
-    <div class="code-block" style="margin-top:8px"><span class="key">{</span>
+    <div class="instructions" style="margin-top:0">
+      Bearer token for authenticating MCP and API requests.
+    </div>
+    <div class="token-reveal">
+      <div class="token-value hidden" id="api-token">{{ api_token }}</div>
+      <button class="btn" id="token-toggle-btn" onclick="toggleToken()">Reveal</button>
+    </div>
+
+    <div class="section-title" style="margin-top:20px; font-size:10px">
+      Remote (recommended)
+      <span class="separator"></span>
+    </div>
+    <div class="instructions" style="margin-top:0; margin-bottom:8px">
+      Connect to the deployed PDFZ server. Add to your project's <code>.mcp.json</code>:
+    </div>
+    <div class="code-block"><span class="key">{</span>
+  <span class="key">"mcpServers"</span>: {
+    <span class="key">"pdfz"</span>: {
+      <span class="key">"type"</span>: <span class="str">"url"</span>,
+      <span class="key">"url"</span>: <span class="str">"https://pdfz-production.up.railway.app/mcp/"</span>,
+      <span class="key">"headers"</span>: {
+        <span class="key">"Authorization"</span>: <span class="str">"Bearer <span style="color:#cc8">&lt;token&gt;</span>"</span>
+      }
+    }
+  }
+<span class="key">}</span></div>
+    <div class="instructions">
+      <ol>
+        <li>Copy the API token above and replace <code>&lt;token&gt;</code> in the JSON</li>
+        <li>Add to your project's <code>.mcp.json</code> and restart Claude Code</li>
+        <li>Three tools will be available:
+          <br/><code>list_documents</code> &mdash; browse all ingested PDFs
+          <br/><code>get_document_toc</code> &mdash; view a document's table of contents
+          <br/><code>search_document_pages</code> &mdash; ask questions about specific pages
+        </li>
+      </ol>
+    </div>
+
+    <div class="section-title" style="margin-top:20px; font-size:10px">
+      Local (development)
+      <span class="separator"></span>
+    </div>
+    <div class="instructions" style="margin-top:0; margin-bottom:8px">
+      Run the MCP server locally as a stdio subprocess:
+    </div>
+    <div class="code-block"><span class="key">{</span>
   <span class="key">"mcpServers"</span>: {
     <span class="key">"pdfz"</span>: {
       <span class="key">"command"</span>: <span class="str">"uv"</span>,
@@ -575,58 +622,15 @@
         <span class="str">"--directory"</span>,
         <span class="str">"/path/to/pdfz"</span>,
         <span class="str">"pdfz-mcp"</span>
-      ],
-      <span class="key">"env"</span>: {
-        <span class="key">"PDFZ_API_URL"</span>: <span class="str">"{{ app_url }}"</span>,
-        <span class="key">"PDFZ_API_TOKEN"</span>: <span class="str">"&lt;token&gt;"</span>
-      }
+      ]
     }
   }
 <span class="key">}</span></div>
     <div class="instructions">
       <ol>
-        <li>Copy the JSON above into your project's <code>.mcp.json</code> (update the <code>--directory</code> path)</li>
-        <li>Replace <code>&lt;token&gt;</code> with the API token shown below</li>
-        <li>Restart Claude Code &mdash; three tools will be available:
-          <br/><code>list_documents</code> &mdash; browse all ingested PDFs
-          <br/><code>get_document_toc</code> &mdash; view a document's table of contents
-          <br/><code>search_document_pages</code> &mdash; ask questions about specific pages
-        </li>
+        <li>Update the path to your local pdfz directory</li>
+        <li>Make sure <code>ANTHROPIC_API_KEY</code> is set in the pdfz project's <code>.env</code></li>
       </ol>
-    </div>
-
-    <div class="section-title" style="margin-top:20px">
-      API endpoints
-      <span class="separator"></span>
-    </div>
-    <div class="instructions" style="margin-top:0">
-      The deployed API is available at <code>{{ app_url }}</code>. Authenticate with the bearer token below.
-    </div>
-    <div class="code-block" style="margin-top:8px; font-size:11px; line-height:1.8">
-<span style="color:#668"># List documents</span>
-curl <span class="str">{{ app_url }}/documents</span> \
-  -H <span class="str">"Authorization: Bearer &lt;token&gt;"</span>
-
-<span style="color:#668"># Ingest a PDF</span>
-curl -X POST <span class="str">{{ app_url }}/ingest</span> \
-  -H <span class="str">"Authorization: Bearer &lt;token&gt;"</span> \
-  -H <span class="str">"Content-Type: application/json"</span> \
-  -d <span class="str">'{"url": "https://example.com/doc.pdf"}'</span>
-
-<span style="color:#668"># Get document details</span>
-curl <span class="str">{{ app_url }}/documents/{id}</span> \
-  -H <span class="str">"Authorization: Bearer &lt;token&gt;"</span></div>
-
-    <div class="section-title" style="margin-top:20px">
-      API token
-      <span class="separator"></span>
-    </div>
-    <div class="instructions" style="margin-top:0">
-      Use this bearer token to authenticate API and MCP requests against the deployed server.
-    </div>
-    <div class="token-reveal">
-      <div class="token-value hidden" id="api-token">{{ api_token }}</div>
-      <button class="btn" id="token-toggle-btn" onclick="toggleToken()">Reveal</button>
     </div>
   </div>
 
