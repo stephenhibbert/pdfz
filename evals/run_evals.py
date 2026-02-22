@@ -3,10 +3,11 @@
 All cases target the Claude Sonnet 4.6 System Card PDF. The document must
 be ingested before running evals.
 
-Three tiers:
+Four tiers:
   1. Basic metadata - deterministic + semantic checks on first pages
   2. Multi-hop retrieval - requires TOC navigation then page lookup
   3. Visual comprehension - requires reading charts, tables, and figures
+  4. Retrieval accuracy - agent selects pages from TOC, measures page recall
 
 Each case has a specific rubric tailored to what a correct answer looks like
 for that exact question, with deterministic checks (Contains) where possible
@@ -15,6 +16,7 @@ and LLMJudge for semantic evaluation.
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
@@ -27,9 +29,16 @@ logfire.configure(
 logfire.instrument_pydantic_ai()
 logfire.instrument_httpx()
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_evals import Case, Dataset
-from pydantic_evals.evaluators import Contains, LLMJudge, MaxDuration
+from pydantic_evals.evaluators import (
+    Contains,
+    Evaluator,
+    EvaluatorContext,
+    EvaluationReason,
+    LLMJudge,
+    MaxDuration,
+)
 from pydantic_ai import Agent, BinaryContent
 
 from pdfz.pdf_utils import download_pdf, extract_page_range
@@ -84,6 +93,133 @@ async def ask_pdf_pages(inp: EvalInput) -> str:
         ]
     )
     return result.output
+
+
+# ---------------------------------------------------------------------------
+# Tier 4: Retrieval accuracy - models, agents, evaluators, task function
+# ---------------------------------------------------------------------------
+
+class RetrievalInput(BaseModel):
+    question: str
+    gold_pages: list[int] = Field(
+        description="Pages that contain the answer (ground truth labels)."
+    )
+
+
+class RetrievalOutput(BaseModel):
+    pages_fetched: list[int] = Field(
+        description="Pages the retrieval agent chose from the TOC."
+    )
+    answer: str = Field(
+        description="The query agent's answer from the fetched pages."
+    )
+
+
+class PageSelection(BaseModel):
+    reasoning: str = Field(
+        description="Brief explanation of why these pages were selected."
+    )
+    pages: list[int] = Field(
+        description="Page numbers to fetch (1-indexed)."
+    )
+
+
+@dataclass
+class PageRecall(Evaluator):
+    """Measures what fraction of gold (answer-containing) pages were fetched."""
+
+    def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
+        gold = set(ctx.inputs.gold_pages)
+        fetched = set(ctx.output.pages_fetched)
+        hits = gold & fetched
+        recall = len(hits) / len(gold) if gold else 1.0
+        return EvaluationReason(
+            value=recall >= 0.5,
+            reason=(
+                f"Page recall: {recall:.0%} ({len(hits)}/{len(gold)}). "
+                f"Gold: {sorted(gold)}, Fetched: {sorted(fetched)}"
+            ),
+        )
+
+
+@dataclass
+class AnswerContains(Evaluator):
+    """Like Contains but checks the .answer field of RetrievalOutput."""
+
+    value: str
+
+    def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
+        found = self.value.lower() in ctx.output.answer.lower()
+        return EvaluationReason(
+            value=found,
+            reason=f"{'Found' if found else 'Missing'}: '{self.value}'",
+        )
+
+
+_retrieval_agent: Agent[None, PageSelection] | None = None
+
+
+def _get_retrieval_agent() -> Agent[None, PageSelection]:
+    global _retrieval_agent
+    if _retrieval_agent is None:
+        _retrieval_agent = Agent(
+            "anthropic:claude-sonnet-4-5-20250929",
+            output_type=PageSelection,
+            system_prompt=(
+                "You are a document retrieval assistant. Given a document's "
+                "table of contents and a question, select the pages most likely "
+                "to contain the answer. Return between 1 and 10 page numbers. "
+                "Think about which section headings are most relevant to the "
+                "question and include a small buffer of surrounding pages."
+            ),
+        )
+    return _retrieval_agent
+
+
+def _get_system_card_doc():
+    """Find the System Card document in the store."""
+    store = DocumentStore()
+    for doc in store.list_all():
+        if SYSTEM_CARD_URL in doc.source_url:
+            return doc
+    raise RuntimeError(
+        "System Card not found in document store. "
+        f"Ingest it first: POST /ingest with url={SYSTEM_CARD_URL}"
+    )
+
+
+async def retrieve_and_ask(inp: RetrievalInput) -> RetrievalOutput:
+    """Task function: retrieval agent picks pages from TOC, then query agent answers."""
+    doc = _get_system_card_doc()
+    pdf_bytes = await _get_pdf()
+
+    # Step 1: Ask retrieval agent to select pages from the TOC
+    selection = await _get_retrieval_agent().run(
+        f"Document: {doc.metadata.title} ({doc.total_pages} pages)\n\n"
+        f"Table of Contents:\n{doc.toc}\n\n"
+        f"Question: {inp.question}\n\n"
+        f"Which pages should I read to answer this question?"
+    )
+
+    # Clamp pages to valid range
+    max_page = doc.total_pages or 200
+    pages = sorted(set(
+        p for p in selection.output.pages
+        if 1 <= p <= max_page
+    ))
+    if not pages:
+        return RetrievalOutput(pages_fetched=[], answer="No pages selected.")
+
+    # Step 2: Extract selected pages and ask the query agent
+    page_bytes = extract_page_range(pdf_bytes, pages[0], pages[-1])
+    result = await _get_query_agent().run(
+        [
+            BinaryContent(data=page_bytes, media_type="application/pdf"),
+            inp.question,
+        ]
+    )
+
+    return RetrievalOutput(pages_fetched=pages, answer=result.output)
 
 
 def check_prerequisites() -> None:
@@ -409,14 +545,117 @@ visual_cases = [
 ]
 
 # ---------------------------------------------------------------------------
-# Combined dataset - no dataset-level evaluators, all checks are case-specific
+# Tier 4: Retrieval accuracy
+# The retrieval agent reads the TOC and picks pages. We measure whether
+# the gold (answer-containing) pages were fetched, plus answer quality.
+# ---------------------------------------------------------------------------
+retrieval_cases = [
+    Case(
+        name="retrieve_swe_bench",
+        inputs=RetrievalInput(
+            question="What is Claude Sonnet 4.6's score on SWE-bench Verified?",
+            gold_pages=[14, 15, 16],
+        ),
+        expected_output="79.6%",
+        evaluators=[
+            PageRecall(),
+            AnswerContains(value="79.6"),
+        ],
+    ),
+    Case(
+        name="retrieve_arc_agi",
+        inputs=RetrievalInput(
+            question="What are Claude Sonnet 4.6's scores on ARC-AGI-1 and ARC-AGI-2?",
+            gold_pages=[19, 20, 21],
+        ),
+        expected_output="86.5% on ARC-AGI-1 and 60.4% on ARC-AGI-2",
+        evaluators=[
+            PageRecall(),
+            AnswerContains(value="86.5"),
+            AnswerContains(value="60.4"),
+        ],
+    ),
+    Case(
+        name="retrieve_reward_hacking",
+        inputs=RetrievalInput(
+            question="What specific reward hacking behaviors were observed in coding contexts? Give concrete examples.",
+            gold_pages=[70, 71, 72, 73],
+        ),
+        expected_output="Reward hacking behaviors such as modifying tests, disabling checks, or gaming evaluation metrics",
+        evaluators=[
+            PageRecall(),
+            LLMJudge(
+                rubric=(
+                    "The answer must describe at least 2 SPECIFIC reward hacking behaviors "
+                    "in coding contexts (e.g. modifying tests, disabling checks, hardcoding outputs). "
+                    "PASS if concrete examples are given. FAIL if generic or missing."
+                ),
+                include_input=True,
+            ),
+        ],
+    ),
+    Case(
+        name="retrieve_bio_safety",
+        inputs=RetrievalInput(
+            question="What AI Safety Level was determined for biological risks? State the level and key reasoning.",
+            gold_pages=[103, 104, 105, 106],
+        ),
+        expected_output="Below ASL-3 for biological risks",
+        evaluators=[
+            PageRecall(),
+            LLMJudge(
+                rubric=(
+                    "The answer must state the AI Safety Level determination for biological "
+                    "risks and provide reasoning. PASS if both level and reasoning are stated. "
+                    "FAIL if either is missing."
+                ),
+                include_input=True,
+                include_expected_output=True,
+            ),
+        ],
+    ),
+    Case(
+        name="retrieve_browsecomp",
+        inputs=RetrievalInput(
+            question="What tools and configuration were used for the Claude models in the BrowseComp evaluation? What was the token limit?",
+            gold_pages=[43, 44, 45],
+        ),
+        expected_output="Web search, web fetch, programmatic tool calling, context compaction at 50k tokens, up to 10M total tokens",
+        evaluators=[
+            PageRecall(),
+            AnswerContains(value="10M"),
+        ],
+    ),
+    Case(
+        name="retrieve_behavioral_audit",
+        inputs=RetrievalInput(
+            question="What behavioral phenomena are measured in the automated behavioral audit? List specific categories and describe the key findings.",
+            gold_pages=[75, 76, 77, 78, 79, 80],
+        ),
+        expected_output="Self-preservation, sycophancy, institutional sabotage, self-serving bias, and other behavioral phenomena with severity assessments",
+        evaluators=[
+            PageRecall(),
+            LLMJudge(
+                rubric=(
+                    "The answer must name at least 3 specific behavioral phenomena from "
+                    "the audit (e.g. self-preservation, sycophancy, sabotage, self-serving bias) "
+                    "and describe findings. PASS if 3+ phenomena named with results. FAIL otherwise."
+                ),
+                include_input=True,
+            ),
+        ],
+    ),
+]
+
+# ---------------------------------------------------------------------------
+# Dataset
 # ---------------------------------------------------------------------------
 dataset = Dataset(
-    cases=basic_cases + multihop_cases + visual_cases,
+    cases=retrieval_cases,
 )
 
 
 if __name__ == "__main__":
     check_prerequisites()
-    report = dataset.evaluate_sync(ask_pdf_pages)
+    report = dataset.evaluate_sync(retrieve_and_ask)
     report.print(include_input=True, include_output=True)

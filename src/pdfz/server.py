@@ -15,9 +15,12 @@ logfire.instrument_pydantic_ai()
 logfire.instrument_httpx()
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
+from pdfz.auth import API_TOKEN, SECRET_KEY, send_magic_link, verify_token
 from pdfz.eval_runner import get_latest_results, run_evals
 from pdfz.ingest import DuplicateDocumentError, ingest_pdf
 from pdfz.models import IngestRequest, IngestResponse, PDFDocument
@@ -26,15 +29,96 @@ from pdfz.store import DocumentStore
 app = FastAPI(title="PDFZ", description="LLM-native PDF retrieval engine")
 logfire.instrument_fastapi(app)
 
+# Auth enabled only in production (when RAILWAY_ENVIRONMENT is set)
+_AUTH_ENABLED = bool(os.environ.get("RAILWAY_ENVIRONMENT"))
+
+
+async def _require_auth(request: Request, call_next):
+    """Redirect unauthenticated requests to the login page. Skipped in local dev."""
+    if not _AUTH_ENABLED:
+        return await call_next(request)
+    path = request.url.path
+    if path.startswith("/auth") or path == "/health":
+        return await call_next(request)
+    # Accept bearer token for API/MCP access
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer ") and auth_header[7:] == API_TOKEN:
+        return await call_next(request)
+    if not request.session.get("email"):
+        return RedirectResponse(url="/auth/login", status_code=302)
+    return await call_next(request)
+
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=_require_auth)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
 store = DocumentStore()
 templates = Jinja2Templates(
     directory=str(Path(__file__).parent / "templates")
 )
 
 
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Auth routes
+# ---------------------------------------------------------------------------
+@app.get("/auth/login", response_class=HTMLResponse)
+async def auth_login(request: Request, sent: str = ""):
+    ctx: dict = {"request": request, "message": None, "message_type": ""}
+    if sent:
+        ctx["message"] = (
+            "Check your inbox — a magic link is on its way. "
+            "It expires in 1 hour."
+        )
+        ctx["message_type"] = "success"
+    return templates.TemplateResponse("login.html", ctx)
+
+
+@app.post("/auth/send", response_class=HTMLResponse)
+async def auth_send(request: Request):
+    form = await request.form()
+    email = str(form.get("email", "")).strip().lower()
+    # Always redirect to avoid email enumeration
+    send_magic_link(email)
+    return RedirectResponse(url="/auth/login?sent=1", status_code=303)
+
+
+@app.get("/auth/verify")
+async def auth_verify(request: Request, token: str = ""):
+    email = verify_token(token)
+    if not email:
+        ctx = {
+            "request": request,
+            "message": "This link is invalid or has expired. Please request a new one.",
+            "message_type": "error",
+        }
+        return templates.TemplateResponse("login.html", ctx)
+    request.session["email"] = email
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/auth/logout")
+async def auth_logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/auth/login", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "api_token": API_TOKEN,
+    })
 
 
 @app.post("/ingest", response_model=IngestResponse)

@@ -44,14 +44,15 @@ async def run_evals() -> dict:
         root_str = str(PROJECT_ROOT)
         if root_str not in sys.path:
             sys.path.insert(0, root_str)
-        from evals.run_evals import dataset, ask_pdf_pages, check_prerequisites
+        from evals.run_evals import (
+            dataset, retrieve_and_ask, check_prerequisites,
+        )
 
         check_prerequisites()
-        report = await dataset.evaluate(ask_pdf_pages)
+        report = await dataset.evaluate(retrieve_and_ask)
 
         cases = []
         for rc in report.cases:
-            # Collect all assertion results
             assertions = {}
             for name, result in rc.assertions.items():
                 assertions[name] = {
@@ -59,14 +60,28 @@ async def run_evals() -> dict:
                     "reason": result.reason or "",
                 }
 
+            # Extract structured fields from RetrievalOutput
+            output_str = ""
+            pages_fetched = []
+            gold_pages = []
+            if hasattr(rc.output, 'answer'):
+                output_str = rc.output.answer[:500]
+                pages_fetched = rc.output.pages_fetched
+            else:
+                output_str = str(rc.output)[:500]
+            if hasattr(rc.inputs, 'gold_pages'):
+                gold_pages = rc.inputs.gold_pages
+
             cases.append({
                 "name": rc.name,
                 "passed": all(r.value for r in rc.assertions.values()),
                 "assertions": assertions,
                 "duration": round(rc.task_duration, 2),
-                "input": str(rc.inputs),
-                "output": str(rc.output)[:500],
+                "input": rc.inputs.question if hasattr(rc.inputs, 'question') else str(rc.inputs),
+                "output": output_str,
                 "expected": str(rc.expected_output)[:500] if rc.expected_output else None,
+                "pages_fetched": pages_fetched,
+                "gold_pages": gold_pages,
             })
 
         _current_run["status"] = "completed"
