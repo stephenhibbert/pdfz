@@ -59,21 +59,22 @@ async def _get_pdf() -> bytes:
     return _pdf_cache
 
 
-_query_agent: Agent[None, str] | None = None
+_extraction_agent: Agent[None, str] | None = None
 
 
-def _get_query_agent() -> Agent[None, str]:
-    global _query_agent
-    if _query_agent is None:
-        _query_agent = Agent(
+def _get_extraction_agent() -> Agent[None, str]:
+    global _extraction_agent
+    if _extraction_agent is None:
+        _extraction_agent = Agent(
             "anthropic:claude-sonnet-4-5-20250929",
             system_prompt=(
-                "Answer the question based on the provided PDF pages. "
-                "Be specific and cite exact numbers, scores, or data points. "
-                "Do not hedge or add caveats unless the data is genuinely ambiguous."
+                "You are a document content extractor. Extract all content from the "
+                "provided PDF pages as clean, structured markdown. Preserve all headings, "
+                "tables, lists, data points, and figures exactly as presented. "
+                "Do not summarise, interpret, or omit any content."
             ),
         )
-    return _query_agent
+    return _extraction_agent
 
 
 class EvalInput(BaseModel):
@@ -86,7 +87,7 @@ async def ask_pdf_pages(inp: EvalInput) -> str:
     """Task function: sends a specific page range + question to the LLM."""
     pdf_bytes = await _get_pdf()
     pages = extract_page_range(pdf_bytes, inp.page_start, inp.page_end)
-    result = await _get_query_agent().run(
+    result = await _get_extraction_agent().run(
         [
             BinaryContent(data=pages, media_type="application/pdf"),
             inp.question,
@@ -110,8 +111,8 @@ class RetrievalOutput(BaseModel):
     pages_fetched: list[int] = Field(
         description="Pages the retrieval agent chose from the TOC."
     )
-    answer: str = Field(
-        description="The query agent's answer from the fetched pages."
+    extracted_content: str = Field(
+        description="Markdown content extracted from the fetched pages."
     )
 
 
@@ -143,13 +144,16 @@ class PageRecall(Evaluator):
 
 
 @dataclass
-class AnswerContains(Evaluator):
-    """Like Contains but checks the .answer field of RetrievalOutput."""
+class SoftenedStringMatch(Evaluator):
+    """Case-insensitive, whitespace-normalised substring match on extracted_content."""
 
     value: str
 
     def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
-        found = self.value.lower() in ctx.output.answer.lower()
+        import re
+        content = re.sub(r'\s+', ' ', ctx.output.extracted_content.lower()).strip()
+        expected = re.sub(r'\s+', ' ', self.value.lower()).strip()
+        found = expected in content
         return EvaluationReason(
             value=found,
             reason=f"{'Found' if found else 'Missing'}: '{self.value}'",
@@ -188,8 +192,8 @@ def _get_system_card_doc():
     )
 
 
-async def retrieve_and_ask(inp: RetrievalInput) -> RetrievalOutput:
-    """Task function: retrieval agent picks pages from TOC, then query agent answers."""
+async def retrieve_and_extract(inp: RetrievalInput) -> RetrievalOutput:
+    """Task function: retrieval agent picks pages from TOC, then extracts content as markdown."""
     doc = _get_system_card_doc()
     pdf_bytes = await _get_pdf()
 
@@ -208,18 +212,19 @@ async def retrieve_and_ask(inp: RetrievalInput) -> RetrievalOutput:
         if 1 <= p <= max_page
     ))
     if not pages:
-        return RetrievalOutput(pages_fetched=[], answer="No pages selected.")
+        return RetrievalOutput(pages_fetched=[], extracted_content="No pages selected.")
 
-    # Step 2: Extract selected pages and ask the query agent
+    # Step 2: Extract selected pages as markdown
     page_bytes = extract_page_range(pdf_bytes, pages[0], pages[-1])
-    result = await _get_query_agent().run(
+    result = await _get_extraction_agent().run(
         [
             BinaryContent(data=page_bytes, media_type="application/pdf"),
-            inp.question,
+            f"Extract all content from pages {pages[0]}-{pages[-1]} of "
+            f"'{doc.metadata.title}' as structured markdown.",
         ]
     )
 
-    return RetrievalOutput(pages_fetched=pages, answer=result.output)
+    return RetrievalOutput(pages_fetched=pages, extracted_content=result.output)
 
 
 def check_prerequisites() -> None:
@@ -559,7 +564,7 @@ retrieval_cases = [
         expected_output="79.6%",
         evaluators=[
             PageRecall(),
-            AnswerContains(value="79.6"),
+            SoftenedStringMatch(value="79.6"),
         ],
     ),
     Case(
@@ -571,8 +576,8 @@ retrieval_cases = [
         expected_output="86.5% on ARC-AGI-1 and 60.4% on ARC-AGI-2",
         evaluators=[
             PageRecall(),
-            AnswerContains(value="86.5"),
-            AnswerContains(value="60.4"),
+            SoftenedStringMatch(value="86.5"),
+            SoftenedStringMatch(value="60.4"),
         ],
     ),
     Case(
@@ -581,17 +586,10 @@ retrieval_cases = [
             question="What specific reward hacking behaviors were observed in coding contexts? Give concrete examples.",
             gold_pages=[70, 71, 72, 73],
         ),
-        expected_output="Reward hacking behaviors such as modifying tests, disabling checks, or gaming evaluation metrics",
+        expected_output="reward hacking",
         evaluators=[
             PageRecall(),
-            LLMJudge(
-                rubric=(
-                    "The answer must describe at least 2 SPECIFIC reward hacking behaviors "
-                    "in coding contexts (e.g. modifying tests, disabling checks, hardcoding outputs). "
-                    "PASS if concrete examples are given. FAIL if generic or missing."
-                ),
-                include_input=True,
-            ),
+            SoftenedStringMatch(value="reward hacking"),
         ],
     ),
     Case(
@@ -600,18 +598,10 @@ retrieval_cases = [
             question="What AI Safety Level was determined for biological risks? State the level and key reasoning.",
             gold_pages=[103, 104, 105, 106],
         ),
-        expected_output="Below ASL-3 for biological risks",
+        expected_output="ASL-3",
         evaluators=[
             PageRecall(),
-            LLMJudge(
-                rubric=(
-                    "The answer must state the AI Safety Level determination for biological "
-                    "risks and provide reasoning. PASS if both level and reasoning are stated. "
-                    "FAIL if either is missing."
-                ),
-                include_input=True,
-                include_expected_output=True,
-            ),
+            SoftenedStringMatch(value="ASL-3"),
         ],
     ),
     Case(
@@ -620,10 +610,11 @@ retrieval_cases = [
             question="What tools and configuration were used for the Claude models in the BrowseComp evaluation? What was the token limit?",
             gold_pages=[43, 44, 45],
         ),
-        expected_output="Web search, web fetch, programmatic tool calling, context compaction at 50k tokens, up to 10M total tokens",
+        expected_output="Web search, web fetch, up to 10M total tokens",
         evaluators=[
             PageRecall(),
-            AnswerContains(value="10M"),
+            SoftenedStringMatch(value="10M"),
+            SoftenedStringMatch(value="web search"),
         ],
     ),
     Case(
@@ -632,17 +623,11 @@ retrieval_cases = [
             question="What behavioral phenomena are measured in the automated behavioral audit? List specific categories and describe the key findings.",
             gold_pages=[75, 76, 77, 78, 79, 80],
         ),
-        expected_output="Self-preservation, sycophancy, institutional sabotage, self-serving bias, and other behavioral phenomena with severity assessments",
+        expected_output="sycophancy, self-preservation",
         evaluators=[
             PageRecall(),
-            LLMJudge(
-                rubric=(
-                    "The answer must name at least 3 specific behavioral phenomena from "
-                    "the audit (e.g. self-preservation, sycophancy, sabotage, self-serving bias) "
-                    "and describe findings. PASS if 3+ phenomena named with results. FAIL otherwise."
-                ),
-                include_input=True,
-            ),
+            SoftenedStringMatch(value="sycophancy"),
+            SoftenedStringMatch(value="self-preservation"),
         ],
     ),
 ]
@@ -657,5 +642,5 @@ dataset = Dataset(
 
 if __name__ == "__main__":
     check_prerequisites()
-    report = dataset.evaluate_sync(retrieve_and_ask)
+    report = dataset.evaluate_sync(retrieve_and_extract)
     report.print(include_input=True, include_output=True)

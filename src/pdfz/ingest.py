@@ -27,18 +27,20 @@ class ExtractionResult(BaseModel):
     title: str
     date_published: str | None = None  # ISO format or None
     authors: list[str] = Field(default_factory=list)
+    contextual_summary: str = Field(
+        default="",
+        description=(
+            "A 2-4 sentence summary: what is this document, "
+            "what topics does it cover, who is the intended audience."
+        ),
+    )
     toc: str = Field(
+        default="",
         description=(
             "The full table of contents as a markdown string. Use nested "
             "markdown lists with indentation to show hierarchy. Include "
             "page numbers where available, e.g. '- 1 Introduction (p. 7)'."
-        )
-    )
-    contextual_summary: str = Field(
-        description=(
-            "A 2-4 sentence summary: what is this document, "
-            "what topics does it cover, who is the intended audience."
-        )
+        ),
     )
 
 
@@ -48,7 +50,9 @@ EXTRACTION_SYSTEM_PROMPT = (
     "1. **Title** of the document\n"
     "2. **Publication date** (ISO format YYYY-MM-DD if available, null otherwise)\n"
     "3. **Authors** (list of names)\n"
-    "4. **Table of contents** as a markdown string. Transcribe the full TOC "
+    "4. **Contextual summary** - what this document is, what it covers, "
+    "and who it is written for (2-4 sentences).\n"
+    "5. **Table of contents** as a markdown string. Transcribe the full TOC "
     "from the document using nested markdown lists. Include page numbers. "
     "Example format:\n"
     "   - 1 Introduction (p. 7)\n"
@@ -56,8 +60,6 @@ EXTRACTION_SYSTEM_PROMPT = (
     "     - 1.2 Overview (p. 10)\n"
     "   - 2 Methods (p. 15)\n"
     "   If there is no explicit TOC, infer one from section headings.\n"
-    "5. **Contextual summary** - what this document is, what it covers, "
-    "and who it is written for (2-4 sentences).\n"
 )
 
 _extraction_agent: Agent[None, ExtractionResult] | None = None

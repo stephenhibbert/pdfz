@@ -51,11 +51,11 @@ async def run_evals() -> dict:
         if root_str not in sys.path:
             sys.path.insert(0, root_str)
         from evals.run_evals import (
-            dataset, retrieve_and_ask, check_prerequisites,
+            dataset, retrieve_and_extract, check_prerequisites,
         )
 
         check_prerequisites()
-        report = await dataset.evaluate(retrieve_and_ask)
+        report = await dataset.evaluate(retrieve_and_extract)
 
         cases = []
         for rc in report.cases:
@@ -70,8 +70,8 @@ async def run_evals() -> dict:
             output_str = ""
             pages_fetched = []
             gold_pages = []
-            if hasattr(rc.output, 'answer'):
-                output_str = rc.output.answer[:500]
+            if hasattr(rc.output, 'extracted_content'):
+                output_str = rc.output.extracted_content[:500]
                 pages_fetched = rc.output.pages_fetched
             else:
                 output_str = str(rc.output)[:500]

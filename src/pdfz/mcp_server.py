@@ -1,5 +1,3 @@
-"""PDFZ MCP server — thin client that calls the deployed PDFZ API."""
-
 from __future__ import annotations
 
 import os
@@ -7,48 +5,61 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+import logfire
+logfire.configure(
+    service_name="pdfz-mcp",
+    environment=os.environ.get("RAILWAY_ENVIRONMENT", "development"),
+)
+logfire.instrument_pydantic_ai()
+logfire.instrument_httpx()
+
 from fastmcp import FastMCP
-import httpx
+from pydantic_ai import Agent, BinaryContent
+
+from pdfz.pdf_utils import download_pdf, extract_page_range
+from pdfz.store import DocumentStore
 
 mcp = FastMCP(name="pdfz")
+store = DocumentStore()
 
-API_URL = os.environ.get("PDFZ_API_URL", "http://localhost:8000")
-API_TOKEN = os.environ.get("PDFZ_API_TOKEN", "")
+EXTRACTION_SYSTEM_PROMPT = (
+    "You are a document content extractor. Extract all content from the "
+    "provided PDF pages as clean, structured markdown. Preserve all headings, "
+    "tables, lists, data points, and figures exactly as presented. "
+    "Do not summarise, interpret, or omit any content."
+)
+
+_extraction_agent: Agent[None, str] | None = None
 
 
-def _headers() -> dict[str, str]:
-    h = {"Content-Type": "application/json"}
-    if API_TOKEN:
-        h["Authorization"] = f"Bearer {API_TOKEN}"
-    return h
-
-
-def _client() -> httpx.Client:
-    return httpx.Client(base_url=API_URL, headers=_headers(), timeout=60.0)
+def _get_extraction_agent() -> Agent[None, str]:
+    global _extraction_agent
+    if _extraction_agent is None:
+        _extraction_agent = Agent(
+            "anthropic:claude-sonnet-4-5-20250929",
+            system_prompt=EXTRACTION_SYSTEM_PROMPT,
+        )
+    return _extraction_agent
 
 
 @mcp.tool()
 def list_documents() -> str:
     """List all ingested PDF documents with their IDs, titles, and summaries.
 
-    Call this first to see what documents are available for searching.
+    Start here to discover what documents are available. Each entry includes
+    the document ID needed for subsequent tool calls, the title, page count,
+    authors, and a summary to help you decide which document to explore.
     """
-    with _client() as client:
-        res = client.get("/documents")
-        res.raise_for_status()
-        docs = res.json()
-
+    docs = store.list_all()
     if not docs:
         return "No documents have been ingested yet."
-
     lines = []
     for doc in docs:
-        meta = doc.get("metadata", {})
-        authors = ", ".join(meta.get("authors", [])) or "Unknown"
         lines.append(
-            f"- **{meta.get('title', 'Untitled')}** (id: {doc['id']})\n"
-            f"  Pages: {doc.get('total_pages', '?')} | Authors: {authors}\n"
-            f"  Summary: {doc.get('contextual_summary', '')}"
+            f"- **{doc.metadata.title}** (id: `{doc.id}`)\n"
+            f"  Pages: {doc.total_pages} | "
+            f"Authors: {', '.join(doc.metadata.authors) or 'Unknown'}\n"
+            f"  Summary: {doc.contextual_summary}"
         )
     return "\n\n".join(lines)
 
@@ -57,62 +68,61 @@ def list_documents() -> str:
 def get_document_toc(document_id: str) -> str:
     """Get the table of contents for a specific document.
 
-    Use this to understand the structure of a document and find
-    which pages to search for specific topics.
+    Use this after list_documents to understand the document structure and
+    identify which page ranges contain the information you need. The TOC
+    includes section headings and page numbers to guide your retrieval.
 
     Args:
         document_id: The ID of the document (from list_documents).
     """
-    with _client() as client:
-        res = client.get(f"/documents/{document_id}")
-        if res.status_code == 404:
-            return f"Document {document_id} not found."
-        res.raise_for_status()
-        doc = res.json()
-
-    toc = doc.get("toc", "")
-    title = doc.get("metadata", {}).get("title", "Unknown")
-    if not toc:
-        return f"No table of contents available for '{title}'."
-    return f"# Table of Contents: {title}\n\n{toc}"
+    doc = store.get(document_id)
+    if doc is None:
+        return f"Document {document_id} not found."
+    if not doc.toc:
+        return f"No table of contents available for '{doc.metadata.title}'."
+    return f"# Table of Contents: {doc.metadata.title}\n\n{doc.toc}"
 
 
 @mcp.tool()
-def search_document_pages(
+async def extract_page_content(
     document_id: str,
     page_start: int,
     page_end: int,
-    question: str,
 ) -> str:
-    """Search specific pages of a PDF document by asking a question.
+    """Extract the content of specific pages from a PDF document as markdown.
 
-    The server downloads the PDF, extracts the requested page range, sends it
-    to an LLM along with the question, and returns the answer. Use the TOC to
-    determine which pages to search.
+    Use the TOC to identify relevant page ranges, then call this tool to
+    retrieve the raw content. Returns clean markdown preserving all text,
+    tables, and structure from the pages — you reason over the content.
+    Make multiple calls for different sections as needed.
 
     Args:
         document_id: The ID of the document to search.
         page_start: First page number (1-indexed, inclusive).
         page_end: Last page number (1-indexed, inclusive). Max 10 page span.
-        question: The question to ask about the content of those pages.
     """
-    with _client() as client:
-        res = client.post(
-            "/api/search",
-            json={
-                "document_id": document_id,
-                "page_start": page_start,
-                "page_end": page_end,
-                "question": question,
-            },
-            timeout=120.0,
-        )
-        if res.status_code == 404:
-            return f"Document {document_id} not found."
-        if res.status_code == 400:
-            return res.json().get("detail", "Bad request")
-        res.raise_for_status()
-        return res.json().get("answer", "")
+    doc = store.get(document_id)
+    if doc is None:
+        return f"Document {document_id} not found."
+
+    if page_end - page_start > 9:
+        return "Please limit page range to 10 pages at a time."
+    if page_start < 1:
+        return "page_start must be >= 1."
+    if doc.total_pages and page_end > doc.total_pages:
+        return f"Document only has {doc.total_pages} pages."
+
+    pdf_bytes = await download_pdf(doc.source_url)
+    page_range_bytes = extract_page_range(pdf_bytes, page_start, page_end)
+
+    result = await _get_extraction_agent().run(
+        [
+            BinaryContent(data=page_range_bytes, media_type="application/pdf"),
+            f"Extract all content from pages {page_start}-{page_end} of "
+            f"'{doc.metadata.title}' as structured markdown.",
+        ]
+    )
+    return result.output
 
 
 def main():
