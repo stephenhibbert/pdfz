@@ -234,6 +234,18 @@
       text-transform: uppercase;
       margin-top: 6px;
     }
+    .doc-delete {
+      background: none;
+      border: none;
+      color: #446;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 2px;
+      flex-shrink: 0;
+      transition: color 0.15s;
+    }
+    .doc-delete:hover { color: #c66; }
 
     .empty-state {
       color: #446;
@@ -601,7 +613,8 @@
         <li>Three tools will be available:
           <br/><code>list_documents</code> &mdash; browse all ingested PDFs
           <br/><code>get_document_toc</code> &mdash; view a document's table of contents
-          <br/><code>search_document_pages</code> &mdash; ask questions about specific pages
+          <br/><code>find_pages</code> &mdash; Ctrl+F search across all pages
+          <br/><code>extract_page_content</code> &mdash; extract raw markdown from specific pages
         </li>
       </ol>
     </div>
@@ -721,6 +734,7 @@ async function loadDocuments() {
                 <span>${pages} pages</span>
               </div>
             </div>
+            <button class="doc-delete" title="Delete document" onclick="deleteDocument('${escHtml(doc.id)}', event)">&times;</button>
           </div>
           <div class="doc-summary">${escHtml(doc.contextual_summary)}</div>
           ${hasToc ? `<div class="expand-hint">click to show table of contents</div>
@@ -732,6 +746,12 @@ async function loadDocuments() {
     document.getElementById('doc-list').innerHTML =
       '<div class="empty-state">Failed to load documents.</div>';
   }
+}
+
+async function deleteDocument(id, event) {
+  event.stopPropagation();
+  const res = await fetch(`/documents/${id}`, { method: 'DELETE' });
+  if (res.ok) loadDocuments();
 }
 
 function toggleToc(card) {
