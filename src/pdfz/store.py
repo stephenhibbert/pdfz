@@ -45,6 +45,14 @@ class DocumentStore:
                 return doc
         return None
 
+    def delete(self, document_id: str) -> bool:
+        docs = self._load()
+        filtered = [d for d in docs if d.id != document_id]
+        if len(filtered) == len(docs):
+            return False
+        self._save(filtered)
+        return True
+
     def find_by_hash(self, content_hash: str) -> PDFDocument | None:
         for doc in self._load():
             if doc.content_hash == content_hash:

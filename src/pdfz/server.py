@@ -164,6 +164,14 @@ async def get_document(document_id: str):
     return doc
 
 
+@app.delete("/documents/{document_id}", status_code=204)
+async def delete_document(document_id: str):
+    """Delete a document from the index by ID."""
+    if not store.delete(document_id):
+        raise HTTPException(status_code=404, detail="Document not found")
+
+
+
 @app.post("/api/evals/run")
 async def run_evals_endpoint(background_tasks: BackgroundTasks):
     """Trigger an eval run in the background."""
