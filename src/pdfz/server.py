@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from pdfz import page_cache
 from pdfz.auth import API_TOKEN, SECRET_KEY, send_magic_link, verify_token
 from pdfz.eval_runner import get_latest_results, run_evals
 from pdfz.ingest import DuplicateDocumentError, ingest_pdf
@@ -169,6 +170,30 @@ async def delete_document(document_id: str):
     """Delete a document from the index by ID."""
     if not store.delete(document_id):
         raise HTTPException(status_code=404, detail="Document not found")
+    page_cache.invalidate(document_id)
+
+
+# ---------------------------------------------------------------------------
+# Cache management
+# ---------------------------------------------------------------------------
+@app.get("/cache/stats")
+async def cache_stats():
+    """Return current page cache statistics."""
+    return {"cached_pages": page_cache.size()}
+
+
+@app.delete("/cache")
+async def clear_cache():
+    """Clear the entire page extraction cache."""
+    cleared = page_cache.invalidate()
+    return {"cleared": cleared}
+
+
+@app.delete("/cache/{document_id}")
+async def clear_document_cache(document_id: str):
+    """Clear cached page extractions for a specific document."""
+    cleared = page_cache.invalidate(document_id)
+    return {"cleared": cleared}
 
 
 
